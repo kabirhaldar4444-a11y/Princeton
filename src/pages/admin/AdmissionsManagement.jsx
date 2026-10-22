@@ -23,7 +23,9 @@ import {
   Loader2,
   ExternalLink,
   Users,
-  Award
+  Award,
+  XCircle,
+  UserX
 } from 'lucide-react';
 import { supabase } from '../../utils/supabase';
 import { useAlert } from '../../context/AlertProvider';
@@ -46,6 +48,11 @@ const AdmissionsManagement = () => {
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [copiedPassword, setCopiedPassword] = useState(false);
   const [processingUserCreation, setProcessingUserCreation] = useState(false);
+
+  // Reject Admission Modal state
+  const [selectedRejectAdmission, setSelectedRejectAdmission] = useState(null);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [processingReject, setProcessingReject] = useState(false);
 
   useEffect(() => {
     fetchAdmissions();
@@ -151,6 +158,54 @@ const AdmissionsManagement = () => {
     }
   };
 
+  const handleOpenRejectModal = (admission) => {
+    setSelectedRejectAdmission(admission);
+    setRejectModalOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!selectedRejectAdmission) return;
+    setProcessingReject(true);
+    try {
+      const { error } = await supabase
+        .from('admissions')
+        .update({ status: 'rejected' })
+        .eq('id', selectedRejectAdmission.id);
+
+      if (error) throw error;
+
+      showAlert(
+        `Admission application for "${selectedRejectAdmission.full_name}" has been rejected.`,
+        'info'
+      );
+      setRejectModalOpen(false);
+      setSelectedRejectAdmission(null);
+      fetchAdmissions();
+    } catch (err) {
+      console.error('Error rejecting admission application:', err);
+      showAlert(err.message || 'Failed to reject admission application.', 'error');
+    } finally {
+      setProcessingReject(false);
+    }
+  };
+
+  const handleReopenAdmission = async (admission) => {
+    try {
+      const { error } = await supabase
+        .from('admissions')
+        .update({ status: 'pending' })
+        .eq('id', admission.id);
+
+      if (error) throw error;
+
+      showAlert(`Application for "${admission.full_name}" moved back to pending.`, 'info');
+      fetchAdmissions();
+    } catch (err) {
+      console.error('Error reopening admission application:', err);
+      showAlert(err.message || 'Failed to reopen admission application.', 'error');
+    }
+  };
+
   // Filtered Admissions List by Search Query
   const filteredAdmissions = admissions.filter((item) => {
     const q = searchQuery.toLowerCase();
@@ -201,6 +256,16 @@ const AdmissionsManagement = () => {
               Approved
             </button>
             <button
+              onClick={() => setStatusFilter('rejected')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                statusFilter === 'rejected'
+                  ? 'bg-white text-rose-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Rejected
+            </button>
+            <button
               onClick={() => setStatusFilter('all')}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                 statusFilter === 'all'
@@ -247,6 +312,10 @@ const AdmissionsManagement = () => {
           <p className="text-slate-500 text-xs mt-1">
             {statusFilter === 'pending'
               ? 'There are currently no pending candidate applications awaiting approval.'
+              : statusFilter === 'approved'
+              ? 'There are currently no approved candidate applications.'
+              : statusFilter === 'rejected'
+              ? 'There are currently no rejected applications.'
               : 'No admission applications match your current search criteria.'}
           </p>
         </div>
@@ -284,6 +353,8 @@ const AdmissionsManagement = () => {
                     className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${
                       item.status === 'approved'
                         ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                        : item.status === 'rejected'
+                        ? 'bg-rose-50 text-rose-600 border border-rose-200'
                         : 'bg-amber-50 text-amber-600 border border-amber-200'
                     }`}
                   >
@@ -296,10 +367,6 @@ const AdmissionsManagement = () => {
                   <div className="flex items-center gap-2 truncate">
                     <Eye className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span className="truncate">{item.email}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>+91 {item.phone}</span>
                   </div>
                   {(item.city || item.state) && (
                     <div className="flex items-center gap-2 truncate">
@@ -343,6 +410,23 @@ const AdmissionsManagement = () => {
                         <span>Watch Video Statement</span>
                       </button>
                     ) : null}
+
+                    {/* Profile Photo Button */}
+                    {item.profile_photo_url && (
+                      <button
+                        onClick={() =>
+                          setActiveMediaModal({
+                            type: 'image',
+                            title: `Profile Photo — ${item.full_name}`,
+                            url: item.profile_photo_url
+                          })
+                        }
+                        className="col-span-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-2 rounded-xl text-xs font-bold border border-indigo-200 flex items-center justify-center gap-2 transition-all"
+                      >
+                        <Eye className="w-4 h-4 text-indigo-600" />
+                        <span>View Profile Photo</span>
+                      </button>
+                    )}
 
                     {/* Aadhaar Front */}
                     {item.aadhaar_front_url && (
@@ -415,20 +499,43 @@ const AdmissionsManagement = () => {
                 </div>
               </div>
 
-              {/* Action Button: Accept & Create User */}
-              <div>
+              {/* Action Buttons: Accept & Reject */}
+              <div className="pt-2 border-t border-slate-100">
                 {item.status === 'pending' ? (
-                  <button
-                    onClick={() => handleOpenAcceptModal(item)}
-                    className="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-2xl font-bold text-xs shadow-md shadow-primary-500/20 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] transition-all"
-                  >
-                    <UserCheck className="w-4 h-4" />
-                    <span>Accept & Create Candidate Account</span>
-                  </button>
-                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleOpenAcceptModal(item)}
+                      className="flex-1 bg-primary-500 hover:bg-primary-600 text-white py-2.5 px-3 rounded-2xl font-bold text-xs shadow-md shadow-primary-500/20 flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.99] transition-all"
+                    >
+                      <UserCheck className="w-4 h-4 shrink-0" />
+                      <span>Accept & Create Account</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenRejectModal(item)}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 py-2.5 px-3.5 rounded-2xl font-bold text-xs border border-rose-200 flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.99] transition-all"
+                      title="Reject Admission"
+                    >
+                      <XCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                      <span>Reject</span>
+                    </button>
+                  </div>
+                ) : item.status === 'approved' ? (
                   <div className="w-full bg-emerald-50 text-emerald-700 py-2.5 rounded-2xl text-xs font-bold text-center border border-emerald-200 flex items-center justify-center gap-1.5">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     <span>Account Created & Approved</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 bg-rose-50/70 border border-rose-200/80 p-2 rounded-2xl">
+                    <div className="flex items-center gap-1.5 text-rose-700 text-xs font-bold pl-2">
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Admission Rejected</span>
+                    </div>
+                    <button
+                      onClick={() => handleReopenAdmission(item)}
+                      className="text-[11px] font-bold text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 hover:border-slate-300 transition-all shadow-2xs"
+                    >
+                      Re-open
+                    </button>
                   </div>
                 )}
               </div>
@@ -539,10 +646,6 @@ const AdmissionsManagement = () => {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Email Address:</span>
                   <span className="font-semibold text-slate-800">{selectedAdmission.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Phone Number:</span>
-                  <span className="font-semibold text-slate-800">+91 {selectedAdmission.phone}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Selected Course:</span>
@@ -684,8 +787,93 @@ const AdmissionsManagement = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* REJECT CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {rejectModalOpen && selectedRejectAdmission && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden p-6 sm:p-8"
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+                  <XCircle className="w-6 h-6" />
+                </div>
+                <button
+                  onClick={() => {
+                    setRejectModalOpen(false);
+                    setSelectedRejectAdmission(null);
+                  }}
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <h3 className="text-xl font-black text-slate-900 font-outfit mb-2">
+                Reject Admission Application?
+              </h3>
+              <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+                Are you sure you want to reject the application for{' '}
+                <span className="font-bold text-slate-900">{selectedRejectAdmission.full_name}</span> (
+                <span className="text-primary-600 font-medium">{selectedRejectAdmission.email}</span>)?
+                The status will be updated to <strong className="text-rose-600">Rejected</strong>.
+              </p>
+
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-6 space-y-1.5 text-xs text-slate-600">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Course:</span>
+                  <span className="font-semibold text-slate-800">{selectedRejectAdmission.course_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Applied Date:</span>
+                  <span className="font-semibold text-slate-800">
+                    {new Date(selectedRejectAdmission.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectModalOpen(false);
+                    setSelectedRejectAdmission(null);
+                  }}
+                  disabled={processingReject}
+                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReject}
+                  disabled={processingReject}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all"
+                >
+                  {processingReject ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Rejecting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4" />
+                      <span>Confirm Rejection</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
 
 export default AdmissionsManagement;
+

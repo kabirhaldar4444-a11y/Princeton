@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   User,
   Mail,
-  Phone,
   MapPin,
   Upload,
   Camera,
@@ -30,6 +29,7 @@ import SignatureCanvas from '../../components/SignatureCanvas';
 import { useAlert } from '../../context/AlertProvider';
 import { indianStatesAndCities } from '../../utils/indiaLocationData';
 import PMISLogo from '../../components/common/PMISLogo';
+import { generateAdmissionVerificationReport } from '../../utils/admissionReport';
 
 // --- SEARCHABLE DROPDOWN COMPONENT (Matching CompleteProfile.jsx) ---
 const SearchableDropdown = ({ value, onChange, options, placeholder, disabled }) => {
@@ -135,6 +135,7 @@ const AdmissionForm = () => {
 
   // Uploaded Files
   const [files, setFiles] = useState({
+    photo: null,
     aadhaarFront: null,
     aadhaarBack: null,
     panCard: null,
@@ -373,13 +374,18 @@ const AdmissionForm = () => {
     if (!cameraStream) return;
     recordedChunksRef.current = [];
     try {
-      const options = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? { mimeType: 'video/webm;codecs=vp9' }
-        : MediaRecorder.isTypeSupported('video/webm')
-        ? { mimeType: 'video/webm' }
-        : {};
+      let mimeType = 'video/webm';
+      if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+        mimeType = 'video/webm;codecs=vp9';
+      } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+        mimeType = 'video/webm;codecs=vp8';
+      } else if (MediaRecorder.isTypeSupported('video/webm')) {
+        mimeType = 'video/webm';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      }
 
-      const mediaRecorder = new MediaRecorder(cameraStream, options);
+      const mediaRecorder = new MediaRecorder(cameraStream, mimeType ? { mimeType } : {});
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
@@ -387,11 +393,13 @@ const AdmissionForm = () => {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        setRecordedBlob(blob);
+        const finalMime = mediaRecorder.mimeType || mimeType || 'video/webm';
+        const ext = finalMime.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(recordedChunksRef.current, { type: finalMime });
+        const videoFile = new File([blob], `video_statement_${Date.now()}.${ext}`, { type: finalMime });
+        setRecordedBlob(videoFile);
         const url = URL.createObjectURL(blob);
         setVideoPreviewUrl(url);
-        captureSnapshotFrame();
       };
 
       mediaRecorder.start(100);
@@ -404,6 +412,7 @@ const AdmissionForm = () => {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && recording) {
+      captureSnapshotFrame();
       mediaRecorderRef.current.stop();
       setRecording(false);
     }
@@ -414,20 +423,32 @@ const AdmissionForm = () => {
     setVideoPreviewUrl(null);
     setRecordedBlob(null);
     setProfileSnapshotBlob(null);
+    setFiles((prev) => ({ ...prev, photo: null }));
     if (!cameraActive) startCamera();
   };
 
   const captureSnapshotFrame = () => {
     if (videoRef.current) {
-      const video = videoRef.current;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (blob) setProfileSnapshotBlob(blob);
-      }, 'image/png');
+      try {
+        const video = videoRef.current;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        // Un-mirror snapshot frame
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const photoFile = new File([blob], `profile_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            setProfileSnapshotBlob(photoFile);
+            setFiles((prev) => ({ ...prev, photo: photoFile }));
+          }
+        }, 'image/jpeg', 0.92);
+      } catch (err) {
+        console.warn('Frame capture error:', err);
+      }
     }
   };
 
@@ -443,12 +464,6 @@ const AdmissionForm = () => {
       return;
     }
 
-    const cleanPhone = formData.phone.replace(/\D/g, '');
-    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
-      showAlert('Please enter a valid 10-digit Indian Mobile Number.', 'error');
-      return;
-    }
-
     if (!formData.courseName.trim()) {
       showAlert('Please enter your Applying Course Name.', 'warning');
       return;
@@ -461,9 +476,44 @@ const AdmissionForm = () => {
   // Upload File Helper
   const handleFileUpload = async (fileOrBlob, bucketPath, bucketName = 'candidate_documents') => {
     if (!fileOrBlob) return null;
-    const fileExt = fileOrBlob.name ? fileOrBlob.name.split('.').pop() : 'jpg';
-    const fileName = `admission_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const { data, error } = await supabase.storage.from(bucketName).upload(fileName, fileOrBlob, { upsert: true });
+
+    // Detect proper extension from filename or mime type
+    let fileExt = '';
+    if (fileOrBlob.name && fileOrBlob.name.includes('.')) {
+      fileExt = fileOrBlob.name.split('.').pop().toLowerCase();
+    } else if (fileOrBlob.type) {
+      if (fileOrBlob.type.includes('webm')) fileExt = 'webm';
+      else if (fileOrBlob.type.includes('mp4')) fileExt = 'mp4';
+      else if (fileOrBlob.type.includes('png')) fileExt = 'png';
+      else if (fileOrBlob.type.includes('jpeg') || fileOrBlob.type.includes('jpg')) fileExt = 'jpg';
+      else {
+        const sub = fileOrBlob.type.split('/')[1];
+        fileExt = sub ? sub.split(';')[0] : 'bin';
+      }
+    }
+
+    // Context fallback based on bucketPath
+    if (!fileExt) {
+      if (bucketPath.includes('video')) fileExt = 'webm';
+      else if (bucketPath.includes('photo')) fileExt = 'jpg';
+      else if (bucketPath.includes('signature')) fileExt = 'png';
+      else fileExt = 'jpg';
+    }
+
+    // Resolve MIME Content-Type
+    let contentType = fileOrBlob.type || '';
+    if (!contentType) {
+      if (fileExt === 'webm') contentType = 'video/webm';
+      else if (fileExt === 'mp4') contentType = 'video/mp4';
+      else if (fileExt === 'png') contentType = 'image/png';
+      else if (fileExt === 'jpg' || fileExt === 'jpeg') contentType = 'image/jpeg';
+    }
+
+    const fileName = `admission_${bucketPath}_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const { data, error } = await supabase.storage.from(bucketName).upload(fileName, fileOrBlob, {
+      contentType: contentType || undefined,
+      upsert: true
+    });
     if (error) throw error;
     const {
       data: { publicUrl }
@@ -473,6 +523,7 @@ const AdmissionForm = () => {
 
   // --- WEB3FORMS EMAIL NOTIFICATION ---
   const sendWeb3FormsNotification = async ({
+    admissionId,
     fullName,
     email,
     phone,
@@ -482,6 +533,7 @@ const AdmissionForm = () => {
     city,
     addressLine,
     ipAddress,
+    photoUrl,
     videoUrl,
     frontUrl,
     backUrl,
@@ -490,46 +542,24 @@ const AdmissionForm = () => {
   }) => {
     try {
       const locationStr = [city, state].filter(Boolean).join(', ');
-      const formattedPhone = phone.startsWith('+91') ? phone : `+91 ${phone.replace(/\D/g, '')}`;
 
-      const messageContent = `
-----------------------------------------
-ADMISSION VERIFICATION REPORT
-----------------------------------------
-
-CANDIDATE INFORMATION:
-----------------------
-• Full Name: ${fullName}
-• Email ID: ${email}
-• Phone: ${formattedPhone}
-• Course Name: ${courseName}
-• PIN Code: ${pincode}
-• Location: ${locationStr || 'N/A'}
-• Residential Address: ${addressLine}
-• IP Address: ${ipAddress || 'Not Detected'}
-
-VERIFICATION DOCUMENTS & MEDIA:
--------------------------------
-• Live Video Statement:
-${videoUrl || 'N/A'}
-
-• Aadhaar Card (Front):
-${frontUrl || 'N/A'}
-
-• Aadhaar Card (Back):
-${backUrl || 'N/A'}
-
-• PAN Card:
-${panUrl || 'N/A'}
-
-• Digital Signature:
-${signatureUrl || 'N/A'}
-
-By proceeding, the candidate electronically signs and agrees to all terms above.
-----------------------------------------
-
-Submitted via Princeton Professionals Exam Portal
-`.trim();
+      const messageContent = generateAdmissionVerificationReport({
+        admissionId,
+        fullName,
+        email,
+        courseName,
+        pincode,
+        locationStr,
+        addressLine,
+        ipAddress: ipAddress || 'Not Detected',
+        evidenceIp: ipAddress || 'Not Detected',
+        photoUrl,
+        videoUrl,
+        frontUrl,
+        backUrl,
+        panUrl,
+        signatureUrl
+      });
 
       const accessKey =
         import.meta.env.VITE_WEB3FORMS_KEY ||
@@ -543,6 +573,7 @@ Submitted via Princeton Professionals Exam Portal
           access_key: accessKey,
           subject: `Admission Form Submitted — ${fullName}`,
           from_name: 'Princeton Exam Portal',
+          name: fullName,
           email: email,
           message: messageContent
         })
@@ -594,13 +625,15 @@ Submitted via Princeton Professionals Exam Portal
         }
       }
 
+      const activePhoto = files.photo || profileSnapshotBlob;
+
       const [frontUrl, backUrl, panUrl, signatureUrl, videoUrl, photoUrl] = await Promise.all([
         handleFileUpload(files.aadhaarFront, 'aadhaar_front', 'aadhaar_cards'),
         handleFileUpload(files.aadhaarBack, 'aadhaar_back', 'aadhaar_cards'),
         files.panCard ? handleFileUpload(files.panCard, 'pan_card', 'candidate_documents') : null,
         handleFileUpload(files.signature, 'signature', 'candidate_documents'),
         handleFileUpload(recordedBlob, 'video_statement', 'candidate_documents'),
-        profileSnapshotBlob ? handleFileUpload(profileSnapshotBlob, 'profile_photo', 'candidate_documents') : null
+        activePhoto ? handleFileUpload(activePhoto, 'profile_photo', 'candidate_documents') : null
       ]);
 
       const fullAddress = `${formData.addressLine ? formData.addressLine + ', ' : ''}${formData.city ? formData.city + ', ' : ''}${formData.state ? formData.state + ' - ' : ''}${formData.pincode}`;
@@ -613,7 +646,7 @@ Submitted via Princeton Professionals Exam Portal
           id: newAdmissionId,
           full_name: formData.fullName.trim(),
           email: formData.email.toLowerCase().trim(),
-          phone: formData.phone.replace(/\D/g, ''),
+          phone: formData.phone ? formData.phone.replace(/\D/g, '') : '',
           course_name: formData.courseName.trim(),
           address: fullAddress.trim(),
           aadhaar_front_url: frontUrl,
@@ -630,6 +663,7 @@ Submitted via Princeton Professionals Exam Portal
 
       // Send Web3Forms Email Notification
       sendWeb3FormsNotification({
+        admissionId: newAdmissionId,
         fullName: formData.fullName.trim(),
         email: formData.email.toLowerCase().trim(),
         phone: formData.phone,
@@ -639,6 +673,7 @@ Submitted via Princeton Professionals Exam Portal
         city: formData.city,
         addressLine: formData.addressLine,
         ipAddress: activeIp || '0.0.0.0',
+        photoUrl,
         videoUrl,
         frontUrl,
         backUrl,
@@ -694,10 +729,6 @@ Submitted via Princeton Professionals Exam Portal
             <div className="flex justify-between border-b border-slate-200/80 pb-2">
               <span className="text-slate-400">Email Address:</span>
               <span className="font-bold text-slate-900">{formData.email}</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-200/80 pb-2">
-              <span className="text-slate-400">Phone Number:</span>
-              <span className="font-bold text-slate-900">+91 {formData.phone}</span>
             </div>
             <div className="flex justify-between border-b border-slate-200/80 pb-2">
               <span className="text-slate-400">Selected Course:</span>
@@ -797,44 +828,19 @@ Submitted via Princeton Professionals Exam Portal
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-0.5">
-                      Phone Number <span className="text-red-500 font-bold text-xs">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="tel"
-                        maxLength={10}
-                        className="input-premium w-full !pl-[90px]"
-                        placeholder="Enter Phone Number"
-                        value={formData.phone}
-                        onChange={(e) =>
-                          setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })
-                        }
-                      />
-                      <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-                        <span className="text-slate-500 font-bold text-sm tracking-wide border-r border-slate-200/80 pr-3 h-6 flex items-center">
-                          IN +91
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Applying Course Input (Text Box) */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-0.5">
-                      Applying Course <span className="text-red-500 font-bold text-xs">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Enter Course Name"
-                      className="input-premium w-full"
-                      value={formData.courseName}
-                      onChange={(e) => setFormData({ ...formData, courseName: e.target.value })}
-                    />
-                  </div>
+                {/* Applying Course Input (Text Box) */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-4 flex items-center gap-0.5">
+                    Applying Course <span className="text-red-500 font-bold text-xs">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Enter Course Name"
+                    className="input-premium w-full"
+                    value={formData.courseName}
+                    onChange={(e) => setFormData({ ...formData, courseName: e.target.value })}
+                  />
                 </div>
 
                 {/* Step 1 Action Button */}
@@ -1116,7 +1122,7 @@ Submitted via Princeton Professionals Exam Portal
                   </div>
                 </div>
 
-                {/* 3. IDENTITY DOCUMENTS (Matching Screenshot) */}
+                {/* 3. IDENTITY DOCUMENTS */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                     <span className="w-1 h-4 bg-primary-500 rounded-full" />
@@ -1125,7 +1131,53 @@ Submitted via Princeton Professionals Exam Portal
                     </h3>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                    {/* Candidate Profile Photo (Live Video Snapshot or Custom Upload) */}
+                    <div className="relative group h-[140px]">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          if (file) {
+                            setFiles((prev) => ({ ...prev, photo: file }));
+                            setProfileSnapshotBlob(file);
+                          }
+                        }}
+                        className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                      />
+                      <div
+                        className={`w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl text-center group-hover:border-primary-500 transition-all bg-white shadow-sm overflow-hidden ${
+                          files.photo || profileSnapshotBlob ? 'p-2' : 'p-6'
+                        }`}
+                      >
+                        {files.photo || profileSnapshotBlob ? (
+                          <div className="relative w-full h-full">
+                            <img
+                              src={URL.createObjectURL(files.photo || profileSnapshotBlob)}
+                              className="w-full h-full object-cover rounded-2xl"
+                              alt="Profile Photo"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white rounded-2xl transition-all">
+                              <Upload className="w-5 h-5 mb-1" />
+                              <span className="text-[9px] font-black uppercase tracking-wider">Change Photo</span>
+                            </div>
+                            <span className="absolute bottom-1 right-1 bg-emerald-600 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-md shadow-xs">
+                              Profile Pic ✓
+                            </span>
+                          </div>
+                        ) : (
+                          <>
+                            <User className="mx-auto w-6 h-6 text-slate-400 mb-2 group-hover:scale-110 transition-transform" />
+                            <span className="text-[10px] font-bold text-slate-500 uppercase flex items-center justify-center gap-0.5">
+                              Profile Photo <span className="text-emerald-500 font-bold text-xs">*</span>
+                            </span>
+                            <span className="text-[8px] text-slate-400 mt-0.5">Auto from Video or Click</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Aadhaar Front */}
                     <div className="relative group h-[140px]">
                       <input

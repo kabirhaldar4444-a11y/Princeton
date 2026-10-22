@@ -1334,14 +1334,6 @@ const ViewCandidateDrawer = ({ user, onClose, onViewDoc, isSuperAdmin }) => {
                      <Mail className="w-4 h-4" /> {user.email}
                   </div>
                   <div className="flex items-center gap-3 text-slate-600 font-medium">
-                     <Phone className="w-4 h-4 text-blue-500" /> 
-                     {isSuperAdmin ? (user.phone || '+91 - Not Provided') : (
-                       <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] text-slate-400 font-bold uppercase tracking-tighter flex items-center gap-1.5 border border-slate-200">
-                         <Lock className="w-2.5 h-2.5" /> SECURE DATA
-                       </span>
-                     )}
-                  </div>
-                  <div className="flex items-center gap-3 text-slate-600 font-medium">
                      <MapPin className="w-4 h-4 text-blue-500" /> 
                      {isSuperAdmin ? (user.address || 'Location Not Provided') : (
                        <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] text-slate-400 font-bold uppercase tracking-tighter flex items-center gap-1.5 border border-slate-200">

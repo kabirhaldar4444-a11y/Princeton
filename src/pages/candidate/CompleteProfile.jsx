@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   User, 
-  Phone, 
   MapPin, 
   Upload, 
   Camera, 
@@ -482,9 +481,39 @@ const CompleteProfile = () => {
 
   const handleFileUpload = async (file, bucketPath, bucketName = 'aadhaar_cards') => {
     if (!file) return null;
-    const fileExt = file.name ? file.name.split('.').pop() : (file.type ? file.type.split('/')[1] : 'png');
+    let fileExt = '';
+    if (file.name && file.name.includes('.')) {
+      fileExt = file.name.split('.').pop().toLowerCase();
+    } else if (file.type) {
+      if (file.type.includes('webm')) fileExt = 'webm';
+      else if (file.type.includes('mp4')) fileExt = 'mp4';
+      else if (file.type.includes('png')) fileExt = 'png';
+      else if (file.type.includes('jpeg') || file.type.includes('jpg')) fileExt = 'jpg';
+      else {
+        const sub = file.type.split('/')[1];
+        fileExt = sub ? sub.split(';')[0] : 'bin';
+      }
+    }
+    if (!fileExt) {
+      if (bucketPath.includes('video')) fileExt = 'webm';
+      else if (bucketPath.includes('photo')) fileExt = 'png';
+      else if (bucketPath.includes('signature')) fileExt = 'png';
+      else fileExt = 'jpg';
+    }
+
+    let contentType = file.type || '';
+    if (!contentType) {
+      if (fileExt === 'webm') contentType = 'video/webm';
+      else if (fileExt === 'mp4') contentType = 'video/mp4';
+      else if (fileExt === 'png') contentType = 'image/png';
+      else if (fileExt === 'jpg' || fileExt === 'jpeg') contentType = 'image/jpeg';
+    }
+
     const fileName = `${user.id}/${bucketPath}_${Date.now()}.${fileExt}`;
-    const { data, error } = await supabase.storage.from(bucketName).upload(fileName, file);
+    const { data, error } = await supabase.storage.from(bucketName).upload(fileName, file, {
+      contentType: contentType || undefined,
+      upsert: true
+    });
     if (error) throw error;
     const { data: { publicUrl } } = supabase.storage.from(bucketName).getPublicUrl(fileName);
     return publicUrl;
@@ -526,7 +555,7 @@ Signature       : ${signatureUrl || 'N/A'}
 ${KYC_LEGAL_ACKNOWLEDGEMENT.trim()}
 
 ---------------------------------
-✅ ${fullName} has accepted Our LEGAL ACKNOWLEDGEMENT
+â ${fullName} has accepted Our LEGAL ACKNOWLEDGEMENT
 ---------------------------------
 
 ---------------------------------
@@ -535,7 +564,7 @@ ${KYC_LEGAL_ACKNOWLEDGEMENT.trim()}
 ${GLOBAL_POLICIES_DECLARATION.trim()}
 
 ---------------------------------
-✅ ${fullName} has accepted Our MASTER PORTAL DECLARATION
+â ${fullName} has accepted Our MASTER PORTAL DECLARATION
 ---------------------------------
           `.trim(),
         }),
@@ -543,17 +572,12 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
       console.log('KYC Notification sent to Web3Forms successfully');
     } catch (err) {
       console.error('Web3Forms Notification Error:', err);
-      // Silent fail — registration is already complete
+      // Silent fail â registration is already complete
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const phoneRegex = /^[6-9]\d{9}$/;
-    if (!phoneRegex.test(formData.phone)) {
-      showAlert('Invalid Mobile Number. Must be 10 digits.', 'error');
-      return;
-    }
     if (!recordedBlob) {
       showAlert('Please record your live video verification statement.', 'warning');
       return;
@@ -576,7 +600,7 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
 
       const fullAddress = `${formData.addressLine ? formData.addressLine + ', ' : ''}${formData.city}, ${formData.state} - ${formData.pincode}`;
       const { error } = await supabase.from('profiles').update({
-        phone: formData.phone,
+        phone: formData.phone || '',
         address: fullAddress,
         profile_photo_url: photoUrl,
         aadhaar_front_url: frontUrl,
@@ -780,7 +804,7 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
                                 scriptLanguage === 'hi' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500'
                               }`}
                             >
-                              हिंदी
+                              à¤¹à¤¿à¤à¤¦à¥
                             </button>
                           </div>
                         </div>
@@ -793,7 +817,7 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
                           </p>
                         ) : (
                           <p>
-                            "मेरा नाम <span className="font-bold text-slate-900 not-italic">{formData.fullName || '[आपका नाम]'}</span> है और मेरा रजिस्टर्ड ईमेल एड्रेस <span className="font-bold text-slate-900 not-italic">{user?.email || '[आपका ईमेल]'}</span> है। मैंने यह वीडियो STATEMENT जान-बूझकर रिकॉर्ड किया है ताकि मैं अपनी प्रोफ़ाइल वेरिफ़ाई कर सकूँ, अपनी पहचान कन्फ़र्म कर सकूँ और Princeton Professional के ट्रेनिंग प्रोग्राम (जो princetonprofessional.in पर उपलब्ध है) में अपने एनरोलमेंट की पुष्टि कर सकूँ। मैं यह कोर्स अपनी पर्सनल स्किल बढ़ाने, प्रोफ़ेशनल DEVELOPMENT और करियर में आगे बढ़ने के लिए खरीद रहा हूँ। मैं पूरी तरह से मानता और समझता हूँ कि Princeton Professional सिर्फ़ एक एजुऑल कोर्स ट्रेनिंग प्रोवाइडर है और कोर्स पूरा होने पर कभी भी नौकरी का वादा, नौकरी मिलने की गारंटी या किसी खास करियर की गारंटी नहीं देता है। इसके अलावा, मैं यह सर्टिफ़ाई करता हूँ कि भविष्य में इस ट्रांज़ैक्शन के बारे में कोई चार्जबैक या शिकायत नहीं करूँगा। मैं यह भी वादा करता हूँ कि इस प्रोग्राम के दौरान मुझे दिए गए किसी भी कॉपीराइट वाले कोर्स मटीरियल को शेयर या डिस्ट्रीब्यूट नहीं करूँगा। यह STATEMENT बिना किसी दबाव के, पूरी जानकारी के साथ और अपनी मर्ज़ी से दिया जा रहा है।"
+                            "मेरा नाम <span className="font-bold text-slate-900 not-italic">{formData.fullName || '[आपका नाम]'}</span> है और मेरा रजिस्टर्ड ईमेल एड्रेस <span className="font-bold text-slate-900 not-italic">{user?.email || '[आपका ईमेल]'}</span> है। मैंने यह वीडियो STATEMENT जान-बूझकर रिकॉर्ड किया है ताकि मैं अपनी प्रोफ़ाइल वेरिफ़ाई कर सकूँ, अपनी पहचान कन्फ़र्म कर सकूँ और Princeton Professional के ट्रेनिंग प्रोग्राम (जो princetonprofessional.in पर उपलब्ध है) में अपने एनरोलमेंट की पुष्टि कर सकूँ। मैं यह कोर्स अपनी पर्सनल स्किल बढ़ाने, प्रोफ़ेशनल DEVELOPMENT और करियर में आगे बढ़ने के लिए खरीद रहा हूँ। मैं पूरी तरह से मानता और समझता हूँ कि Princeton Professional सिर्फ़ एक एजुकेशनल स्किल-बेस्ड कोर्स ट्रेनिंग प्रोवाइडर है और कोर्स पूरा होने पर कभी भी नौकरी का वादा, नौकरी मिलने की गारंटी या किसी खास करियर की गारंटी नहीं देता है। इसके अलावा, मैं यह सर्टिफ़ाई करता हूँ कि भविष्य में इस ट्रांज़ैक्शन के बारे में कोई चार्जबैक या शिकायत नहीं करूँगा। मैं यह भी वादा करता हूँ कि इस प्रोग्राम के दौरान मुझे दिए गए किसी भी कॉपीराइट वाले कोर्स मटीरियल को शेयर या डिस्ट्रीब्यूट नहीं करूँगा। यह STATEMENT बिना किसी दबाव के, पूरी जानकारी के साथ और अपनी मर्ज़ी से दिया जा रहा है।"
                           </p>
                         )}
                       </div>
@@ -801,23 +825,6 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
                   )}
                 </AnimatePresence>
               </div>
-            </div>
-
-            {/* Profile Photo Auto-Capture Confirmation Circle */}
-            <div className="flex flex-col items-center gap-4 group pt-2 pb-4">
-              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Captured Profile Snapshot</label>
-              <div className="relative">
-                <div className={`w-32 h-32 rounded-full border-4 flex flex-col items-center justify-center transition-all bg-white ${files.photo ? 'border-primary-500 shadow-2xl scale-105' : 'border-slate-100 shadow-inner'}`}>
-                  {files.photo ? (
-                    <img src={URL.createObjectURL(files.photo)} className="w-full h-full rounded-full object-cover" />
-                  ) : (
-                    <Camera className="w-8 h-8 text-slate-200" />
-                  )}
-                </div>
-              </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                {files.photo ? '✓ Profile Photo Captured from Video Feed' : 'Awaiting video statement recording...'}
-              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
