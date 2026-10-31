@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Loader2, ArrowRight, Eye, EyeOff, Smartphone, Laptop, Watch, Headphones } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAlert } from '../context/AlertProvider';
+import { recordPortalEntryTime } from '../utils/auditService';
 
 import PMISLogo from '../components/common/PMISLogo';
 
@@ -29,6 +30,7 @@ const Login = () => {
 
     try {
       const data = await login(email, password);
+      recordPortalEntryTime(data.user?.id);
       
       // Fetch profile for role-based redirection
       const { data: profile, error: profileError } = await supabase

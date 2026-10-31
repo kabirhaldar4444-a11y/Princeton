@@ -6,7 +6,11 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Plus, Search, Shield, Eye, Edit2, Trash2, Lock, Unlock, X, 
   Loader2, Mail, User, Key, CheckCircle, FileText, Download, UploadCloud, MapPin, Phone,
-  RotateCw, ArrowLeft, Send, EyeOff, Clock
+
+
+
+  RotateCw, ArrowLeft, Send, EyeOff, Clock, Globe
+
 } from 'lucide-react';
 import { useAlert } from '../../context/AlertProvider';
 import { useAuth } from '../../context/AuthContext';
@@ -652,7 +656,7 @@ const CreateUserModal = ({ isOpen, onClose, newUser, setNewUser, handleCreateUse
                         <div className="relative">
                           <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-500" />
                           <input 
-                            type="email" required placeholder="user@elitetoolistic.com" 
+                            type="email" required placeholder="user@princeton.com" 
                             className="w-full pl-[50px] pr-4 py-3.5 bg-slate-100/80 border border-slate-200 text-slate-800 rounded-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 focus:bg-white transition-all text-[15px] font-medium placeholder:font-normal placeholder:text-slate-400"
                             value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})}
                           />
@@ -1341,6 +1345,11 @@ const ViewCandidateDrawer = ({ user, onClose, onViewDoc, isSuperAdmin }) => {
                        </span>
                      )}
                   </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-slate-600 font-medium">
+                   <Globe className="w-4 h-4 text-blue-500" /> 
+                   <span className="text-sm">KYC IP: <strong className="text-slate-800">{user.ip_address || 'Not Recorded'}</strong></span>
                 </div>
 
                 {/* Decorative avatar watermark */}

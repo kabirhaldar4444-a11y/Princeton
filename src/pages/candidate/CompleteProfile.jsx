@@ -354,13 +354,13 @@ const CompleteProfile = () => {
         // Try Cloudflare first (extremely reliable)
         const res = await fetch('https://www.cloudflare.com/cdn-cgi/trace');
         const text = await res.text();
-        const ipMatch = text.match(/ip=([\d.]+)/);
+        const ipMatch = text.match(/ip=([^\r\n\s]+)/);
         if (ipMatch && ipMatch[1]) {
           setFormData(prev => ({ ...prev, ipAddress: ipMatch[1] }));
           return;
         }
         // Fallback to ipify
-        const res2 = await fetch('https://api.ipify.org?format=json');
+        const res2 = await fetch('https://api64.ipify.org?format=json');
         const data2 = await res2.json();
         if (data2.ip) setFormData(prev => ({ ...prev, ipAddress: data2.ip }));
       } catch (err) {
@@ -526,12 +526,12 @@ const CompleteProfile = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
-          access_key: import.meta.env.VITE_WEB3FORMS_KEY || '4c65807a-e5d0-46e0-9cbd-70d264618cf1',
+          access_key: import.meta.env.VITE_WEB3FORMS_KEY || '113ac740-421d-4345-b8fd-21d0d5660372',
           subject: `NEW REGISTRATION: ${email}`,
           from_name: 'Princeton Exam Portal',
           message: `
 NEW CANDIDATE KYC SUBMITTED
-============================
+
 Name     : ${fullName}
 Email    : ${email}
 Residence Address : ${fullAddress}
@@ -607,11 +607,19 @@ ${GLOBAL_POLICIES_DECLARATION.trim()}
         aadhaar_back_url: backUrl,
         pan_card_url: panUrl,
         signature_url: signatureUrl,
+
         video_url: videoUrl,
+
+        ip_address: formData.ipAddress || null,
+
         profile_completed: true
       }).eq('id', user.id);
 
       if (error) throw error;
+
+      if (formData.ipAddress) {
+        localStorage.setItem('candidate_kyc_ip', formData.ipAddress);
+      }
 
       // Fire email notification (non-blocking)
       sendEmailNotification({

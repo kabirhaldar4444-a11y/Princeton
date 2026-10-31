@@ -22,10 +22,11 @@ import {
 } from 'lucide-react';
 import { useAlert } from '../../context/AlertProvider';
 import PMISLogo from '../../components/common/PMISLogo';
+import { getPortalEntryTime, getKycIpAddress, sendExamAuditEmail } from '../../utils/auditService';
 
 const ExamPortal = () => {
   const { id: examId } = useParams();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showAlert, confirm } = useAlert();
   const navigate = useNavigate();
   
@@ -46,6 +47,10 @@ const ExamPortal = () => {
   const answersRef = useRef({});
   const indexRef = useRef(0);
   const timeRef = useRef(null);
+  const examStartTimeRef = useRef(Date.now());
+  const hasSubmittedRef = useRef(false);
+  const tabSwitchCountRef = useRef(0);
+  const [tabWarnings, setTabWarnings] = useState(0);
 
   // 1. Initial Load
   useEffect(() => {
@@ -57,6 +62,15 @@ const ExamPortal = () => {
         if (!examData) throw new Error('Exam not found');
         setExam(examData);
         setQuestions(qData || []);
+
+        const storedExamEntry = sessionStorage.getItem(`exam_entry_${examId}`);
+        if (storedExamEntry) {
+          examStartTimeRef.current = parseInt(storedExamEntry, 10);
+        } else {
+          const nowMs = Date.now();
+          examStartTimeRef.current = nowMs;
+          sessionStorage.setItem(`exam_entry_${examId}`, nowMs.toString());
+        }
         
         // Load local progress
         const saved = localStorage.getItem(`exam_sync_${examId}`);
@@ -139,15 +153,34 @@ const ExamPortal = () => {
         message: 'Are you sure you want to finish the exam? This action cannot be undone.',
         confirmText: 'Submit Now',
         type: 'info',
-        onConfirm: processSubmit
+        onConfirm: () => processSubmit('Exam Submitted Successfully by Candidate')
       });
     }
-    processSubmit();
+    processSubmit('Exam Submitted Successfully by Candidate');
   };
 
-  const processSubmit = async () => {
+  const processSubmit = async (exitTrigger = 'Exam Submitted Successfully by Candidate') => {
+    if (submitting || hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
     setSubmitting(true);
     try {
+      const exitTime = new Date();
+      const portalEntryDate = getPortalEntryTime(user?.id);
+
+      // Duration calculations:
+      const totalAllowedSeconds = (exam?.duration || 60) * 60;
+      const currentSecondsLeft = timeRef.current;
+      let examScreenSeconds;
+      if (currentSecondsLeft !== null && currentSecondsLeft < totalAllowedSeconds) {
+        examScreenSeconds = Math.max(1, totalAllowedSeconds - currentSecondsLeft);
+      } else {
+        const wallClockExam = Math.round((exitTime.getTime() - (examStartTimeRef.current || exitTime.getTime())) / 1000);
+        examScreenSeconds = Math.max(1, wallClockExam);
+      }
+
+      const wallClockPortal = Math.round((exitTime.getTime() - portalEntryDate.getTime()) / 1000);
+      const totalPortalSeconds = Math.max(examScreenSeconds, wallClockPortal);
+
       const finalScore = calculateScore();
       const { error } = await supabase.from('submissions').insert({
         user_id: user.id,
@@ -156,24 +189,143 @@ const ExamPortal = () => {
         total_questions: questions.length,
         answers: answersRef.current,
         is_released: false,
-        submitted_at: new Date().toISOString()
+        submitted_at: exitTime.toISOString()
       });
 
       if (error) throw error;
 
+      // Smart background dispatch of strictly confidential Admin Audit Report
+      getKycIpAddress(user, profile).then(kycIp => {
+        sendExamAuditEmail({
+          candidateEmail: user?.email || profile?.email || '',
+          candidateName: profile?.full_name || user?.email || '',
+          candidateIp: kycIp,
+          examTitle: exam?.title || 'Examination',
+          allowedDurationMinutes: exam?.duration || 60,
+          portalEntryTime: portalEntryDate,
+          portalExitTime: exitTime,
+          totalPortalSeconds: totalPortalSeconds,
+          examScreenSeconds: examScreenSeconds,
+          exitTrigger: exitTrigger
+        });
+      }).catch(auditErr => {
+        console.warn('Audit email dispatch deferred:', auditErr);
+      });
+
       showAlert('Exam submitted successfully!', 'success');
       localStorage.removeItem(`exam_sync_${examId}`);
+      sessionStorage.removeItem(`exam_entry_${examId}`);
       navigate('/');
     } catch (err) {
       showAlert(err.message, 'error');
       setSubmitting(false);
+      hasSubmittedRef.current = false;
     }
   };
 
   const handleAutoSubmit = useCallback(() => {
     showAlert('Time is up! Submitting automatically...', 'warning');
-    processSubmit();
-  }, []);
+    processSubmit('Time Expired — Auto Submitted by System');
+  }, [exam, questions, user, profile]);
+
+  // Proctoring: Detect Tab-Switching and Window Focus Loss
+  useEffect(() => {
+    if (!hasAcceptedDeclaration || submitting) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && !hasSubmittedRef.current) {
+        tabSwitchCountRef.current += 1;
+        const currentCount = tabSwitchCountRef.current;
+        setTabWarnings(currentCount);
+
+        if (currentCount >= 3) {
+          showAlert('Security Violation: Maximum tab switching exceeded! Examination terminated.', 'error');
+          processSubmit('Disqualified — Excessive Tab Switching / Unfair Means Violation');
+        } else if (currentCount === 2) {
+          showAlert('Security Warning 2/3: Tab switching detected! One more violation will terminate your exam!', 'error');
+        } else {
+          showAlert('Security Warning 1/3: Tab switching is prohibited! Your exam session is actively monitored.', 'warning');
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [hasAcceptedDeclaration, submitting]);
+
+  // Session Tracking: Detect Early Browser or Tab Closure Before Submission
+  useEffect(() => {
+    if (!hasAcceptedDeclaration) return;
+
+    const handlePageHide = () => {
+      if (hasSubmittedRef.current) return;
+      hasSubmittedRef.current = true;
+
+      const exitTime = new Date();
+      const portalEntryDate = getPortalEntryTime(user?.id);
+      const totalAllowedSeconds = (exam?.duration || 60) * 60;
+      const currentSecondsLeft = timeRef.current;
+      const timerSpent = currentSecondsLeft !== null && currentSecondsLeft < totalAllowedSeconds
+        ? totalAllowedSeconds - currentSecondsLeft
+        : Math.round((exitTime.getTime() - (examStartTimeRef.current || exitTime.getTime())) / 1000);
+      const examScreenSeconds = Math.max(1, timerSpent);
+      const totalPortalSeconds = Math.max(examScreenSeconds, Math.round((exitTime.getTime() - portalEntryDate.getTime()) / 1000));
+      const kycIp = localStorage.getItem('candidate_kyc_ip') || profile?.ip_address || 'Not Detected';
+
+      sendExamAuditEmail({
+        candidateEmail: user?.email || profile?.email || '',
+        candidateName: profile?.full_name || user?.email || '',
+        candidateIp: kycIp,
+        examTitle: exam?.title || 'Examination',
+        allowedDurationMinutes: exam?.duration || 60,
+        portalEntryTime: portalEntryDate,
+        portalExitTime: exitTime,
+        totalPortalSeconds: totalPortalSeconds,
+        examScreenSeconds: examScreenSeconds,
+        exitTrigger: 'Candidate Closed Browser / Abandoned Exam Session Early',
+        useBeacon: true
+      });
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [hasAcceptedDeclaration, exam, user, profile]);
+
+  // Component Unmount: Detect In-App Navigation Away Before Submitting
+  useEffect(() => {
+    return () => {
+      if (hasAcceptedDeclaration && !hasSubmittedRef.current) {
+        hasSubmittedRef.current = true;
+        const exitTime = new Date();
+        const portalEntryDate = getPortalEntryTime(user?.id);
+        const totalAllowedSeconds = (exam?.duration || 60) * 60;
+        const currentSecondsLeft = timeRef.current;
+        const timerSpent = currentSecondsLeft !== null && currentSecondsLeft < totalAllowedSeconds
+          ? totalAllowedSeconds - currentSecondsLeft
+          : Math.round((exitTime.getTime() - (examStartTimeRef.current || exitTime.getTime())) / 1000);
+        const examScreenSeconds = Math.max(1, timerSpent);
+        const totalPortalSeconds = Math.max(examScreenSeconds, Math.round((exitTime.getTime() - portalEntryDate.getTime()) / 1000));
+        const kycIp = localStorage.getItem('candidate_kyc_ip') || profile?.ip_address || 'Not Detected';
+
+        sendExamAuditEmail({
+          candidateEmail: user?.email || profile?.email || '',
+          candidateName: profile?.full_name || user?.email || '',
+          candidateIp: kycIp,
+          examTitle: exam?.title || 'Examination',
+          allowedDurationMinutes: exam?.duration || 60,
+          portalEntryTime: portalEntryDate,
+          portalExitTime: exitTime,
+          totalPortalSeconds: totalPortalSeconds,
+          examScreenSeconds: examScreenSeconds,
+          exitTrigger: 'Candidate Navigated Away / Abandoned Exam Screen'
+        });
+      }
+    };
+  }, [hasAcceptedDeclaration, exam, user, profile]);
 
   const formatTime = (seconds) => {
     if (seconds === null) return "00:00";
@@ -319,7 +471,14 @@ const ExamPortal = () => {
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-8">
+        <div className="ml-auto flex items-center gap-6">
+           {tabWarnings > 0 && (
+             <div className="flex items-center gap-2 bg-rose-50 text-rose-600 px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold animate-pulse">
+               <AlertTriangle className="w-4 h-4 text-rose-500" />
+               <span>Warning: {tabWarnings}/3 Tab Switches</span>
+             </div>
+           )}
+
            <button 
               onClick={() => handleSubmit()} 
               disabled={submitting}

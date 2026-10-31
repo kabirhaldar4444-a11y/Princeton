@@ -21,6 +21,7 @@ import {
 import { useAlert } from '../../context/AlertProvider';
 import DisclaimerOverlay from '../../components/DisclaimerOverlay';
 import PMISLogo from '../../components/common/PMISLogo';
+import { getPortalEntryTime, sendExamAuditEmail } from '../../utils/auditService';
 
 const CandidateDashboard = () => {
   const { user, profile, logout } = useAuth();
@@ -76,6 +77,38 @@ const CandidateDashboard = () => {
       confirmText: 'Sign Out',
       type: 'danger',
       onConfirm: async () => {
+        // Smart Check: If candidate logs out with an incomplete / in-progress examination
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('exam_sync_')) {
+              const activeExamId = key.replace('exam_sync_', '');
+              const activeExam = exams.find(e => e.id === activeExamId);
+              const portalEntryDate = getPortalEntryTime(user?.id);
+              const exitTime = new Date();
+              const totalPortalSeconds = Math.max(1, Math.round((exitTime.getTime() - portalEntryDate.getTime()) / 1000));
+              const kycIp = localStorage.getItem('candidate_kyc_ip') || profile?.ip_address || 'Not Detected';
+
+              sendExamAuditEmail({
+                candidateEmail: user?.email || profile?.email || '',
+                candidateName: profile?.full_name || user?.email || '',
+                candidateIp: kycIp,
+                examTitle: activeExam?.title || 'In-Progress Examination',
+                allowedDurationMinutes: activeExam?.duration || 60,
+                portalEntryTime: portalEntryDate,
+                portalExitTime: exitTime,
+                totalPortalSeconds: totalPortalSeconds,
+                examScreenSeconds: totalPortalSeconds,
+                exitTrigger: 'Candidate Logged Out Before Submitting Exam'
+              });
+              localStorage.removeItem(key);
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn('Logout exam audit check error:', e);
+        }
+
         await logout();
         showAlert('Logged out successfully', 'success');
         navigate('/login');
