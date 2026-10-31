@@ -88,6 +88,35 @@ export const getPortalEntryTime = (userId) => {
 };
 
 /**
+ * Detect client IP supporting both IPv4 and IPv6 networks
+ */
+export const detectClientIp = async () => {
+  // Method 1: Cloudflare trace
+  try {
+    const res = await fetch('https://www.cloudflare.com/cdn-cgi/trace');
+    const text = await res.text();
+    const match = text.match(/ip=([^\r\n\s]+)/);
+    if (match && match[1]) return match[1].trim();
+  } catch {}
+
+  // Method 2: api64.ipify.org (Dual-stack IPv4 & IPv6)
+  try {
+    const res2 = await fetch('https://api64.ipify.org?format=json');
+    const data2 = await res2.json();
+    if (data2?.ip) return data2.ip.trim();
+  } catch {}
+
+  // Method 3: ipwho.is
+  try {
+    const res3 = await fetch('https://ipwho.is/');
+    const data3 = await res3.json();
+    if (data3?.ip) return data3.ip.trim();
+  } catch {}
+
+  return null;
+};
+
+/**
  * Resolve candidate IP Address strictly from KYC Form / Database / Local storage
  * with non-intrusive fallback if KYC was completed prior to field introduction.
  */
@@ -122,42 +151,15 @@ export const getKycIpAddress = async (user, profile) => {
 
   // 4. Silent fallback detection & sync to candidate profile
   try {
-    const res = await fetch('https://www.cloudflare.com/cdn-cgi/trace');
-    const text = await res.text();
-    const ipMatch = text.match(/ip=([^\r\n\s]+)/);
-    if (ipMatch && ipMatch[1]) {
-      const detectedIp = ipMatch[1];
+    const detectedIp = await detectClientIp();
+    if (detectedIp) {
       localStorage.setItem('candidate_kyc_ip', detectedIp);
       if (user?.id) {
         supabase.from('profiles').update({ ip_address: detectedIp }).eq('id', user.id).then();
       }
       return detectedIp;
     }
-  } catch {
-    try {
-      const res2 = await fetch('https://api64.ipify.org?format=json');
-      const data2 = await res2.json();
-      if (data2.ip) {
-        localStorage.setItem('candidate_kyc_ip', data2.ip);
-        if (user?.id) {
-          supabase.from('profiles').update({ ip_address: data2.ip }).eq('id', user.id).then();
-        }
-        return data2.ip;
-      }
-    } catch {
-      try {
-        const res3 = await fetch('https://ipwho.is/');
-        const data3 = await res3.json();
-        if (data3.ip) {
-          localStorage.setItem('candidate_kyc_ip', data3.ip);
-          if (user?.id) {
-            supabase.from('profiles').update({ ip_address: data3.ip }).eq('id', user.id).then();
-          }
-          return data3.ip;
-        }
-      } catch {}
-    }
-  }
+  } catch {}
 
   return 'Not Detected';
 };
@@ -270,4 +272,3 @@ Automated Security Tracking System • Princeton Exam Portal
     return { success: false, error: error.message };
   }
 };
-
