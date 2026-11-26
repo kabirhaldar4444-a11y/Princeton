@@ -13,7 +13,6 @@ export function generateAdmissionVerificationReport({
   addressLine,
   ipAddress,
   evidenceIp,
-  photoUrl,
   videoUrl,
   frontUrl,
   backUrl,
@@ -265,9 +264,6 @@ The Client explicitly recognizes that Princeton Professional does not maintain, 
 ## SUPPORTING EVIDENCE:
 
 • IP Address: ${supportingIp}
-
-• Profile Photo:
-${photoUrl || 'N/A'}
 
 • Live Video Statement:
 ${videoUrl || 'N/A'}
