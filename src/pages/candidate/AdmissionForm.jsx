@@ -526,8 +526,6 @@ const AdmissionForm = () => {
     admissionId,
     fullName,
     email,
-    phone,
-    courseName,
     pincode,
     state,
     city,
@@ -546,7 +544,6 @@ const AdmissionForm = () => {
         admissionId,
         fullName,
         email,
-        courseName,
         pincode,
         locationStr,
         addressLine,
@@ -570,8 +567,8 @@ const AdmissionForm = () => {
         body: JSON.stringify({
           access_key: accessKey,
           subject: `Admission Form Submitted — ${fullName}`,
-          from_name: 'Princeton Exam Portal',
-          name: fullName,
+          from_name: 'Princeton Professional Exam Portal',
+          Recipient: 'support@princetonprofessional.com',
           email: email,
           message: messageContent
         })
@@ -664,8 +661,6 @@ const AdmissionForm = () => {
         admissionId: newAdmissionId,
         fullName: formData.fullName.trim(),
         email: formData.email.toLowerCase().trim(),
-        phone: formData.phone,
-        courseName: formData.courseName.trim(),
         pincode: formData.pincode,
         state: formData.state,
         city: formData.city,
