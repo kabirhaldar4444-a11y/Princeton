@@ -561,6 +561,9 @@ const AdmissionForm = () => {
         import.meta.env.VITE_WEB3FORMS_ACCESS_KEY ||
         '4c65807a-e5d0-46e0-9cbd-70d264618cf1';
 
+      const recipientEmail =
+        import.meta.env.VITE_WEB3FORMS_RECIPIENT || 'support@princetonprofessional.com';
+
       await fetch('https://api.web3forms.com/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -568,7 +571,7 @@ const AdmissionForm = () => {
           access_key: accessKey,
           subject: `Admission Form Submitted — ${fullName}`,
           from_name: 'Princeton Professional Exam Portal',
-          Recipient: 'support@princetonprofessional.com',
+          Recipient: recipientEmail,
           email: email,
           message: messageContent
         })
